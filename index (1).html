@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sottotitoli live</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0e1620">
+<link rel="icon" href="icon-192.png">
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#eef2f6;--ink:#14202e;--mut:#5a6878;--card:#fff;--line:#d3dbe4;--acc:#2457d6;--rec:#d92d20;--stage:#0e1620;--stagefg:#f4f7fa;--stagemut:#8da0b5;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0a1018;--ink:#e6edf5;--mut:#8da0b5;--card:#131c27;--line:#26323f;--acc:#6b9bff;--rec:#ff6b5e;--stage:#05090e;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0a1018;--ink:#e6edf5;--mut:#8da0b5;--card:#131c27;--line:#26323f;--acc:#6b9bff;--rec:#ff6b5e;--stage:#05090e;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 "Atkinson Hyperlegible",system-ui,sans-serif}
+main{max-width:760px;margin:0 auto;padding:20px 16px 40px}
+h1{font-size:1.4rem;margin:0 0 4px}
+.sub{color:var(--mut);margin:0 0 16px}
+.stage{background:var(--stage);color:var(--stagefg);border-radius:14px;min-height:190px;padding:22px 20px;display:flex;flex-direction:column;justify-content:flex-end;gap:6px}
+.stage .prev{color:var(--stagemut);font-size:1rem;min-height:1.5em}
+.stage .now{font-size:clamp(1.4rem,5vw,2rem);line-height:1.3;font-weight:700;min-height:2.6em}
+.stage .now i{font-style:normal;color:var(--stagemut);font-weight:400}
+.bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:14px 0}
+button,select{font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 14px;min-height:44px}
+button{cursor:pointer}
+button:focus-visible,select:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+#rec{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:700;padding:10px 22px}
+#rec.on{background:var(--rec);border-color:var(--rec)}
+#st{color:var(--mut);font-size:.95rem}
+.log{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:6px 16px;max-height:340px;overflow:auto}
+.log p{margin:0;padding:10px 0;border-bottom:1px solid var(--line);display:flex;gap:14px}
+.log p:last-child{border:0}
+.log time{color:var(--mut);font-variant-numeric:tabular-nums;flex:none}
+.empty{color:var(--mut);padding:14px 0}
+.msg{background:var(--card);border:1px solid var(--rec);border-radius:10px;padding:10px 14px;margin:12px 0;display:none}
+</style>
+</head>
+<body>
+<main>
+<h1>Sottotitoli live</h1>
+<p class="sub">Premi Avvia e parla: il microfono viene trascritto in tempo reale.</p>
+<div class="stage" aria-live="polite"><div class="prev" id="prev"></div><div class="now" id="now">I sottotitoli compariranno qui.</div></div>
+<div class="msg" id="msg" role="alert"></div>
+<div class="bar">
+<button id="rec">Avvia</button>
+<select id="lang" aria-label="Lingua">
+<option value="it-IT">Italiano</option><option value="en-US">English (US)</option><option value="en-GB">English (UK)</option><option value="fr-FR">Français</option><option value="de-DE">Deutsch</option><option value="es-ES">Español</option>
+</select>
+<span id="st">Fermo</span>
+</div>
+<div class="bar">
+<button id="srt">Scarica .srt</button><button id="txt">Scarica .txt</button><button id="cp">Copia testo</button><button id="clr">Cancella</button>
+</div>
+<div class="log" id="log"><div class="empty">La trascrizione apparirà qui.</div></div>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+let rec,on=false,t0=0,segStart=null,segs=[];
+const pad=(n,l=2)=>String(n).padStart(l,"0");
+function ts(ms,srt){const h=Math.floor(ms/36e5),m=Math.floor(ms%36e5/6e4),s=Math.floor(ms%6e4/1e3),c=Math.floor(ms%1e3);return srt?`${pad(h)}:${pad(m)}:${pad(s)},${pad(c,3)}`:`${pad(m+h*60)}:${pad(s)}`}
+function showMsg(t){const m=$("msg");m.textContent=t;m.style.display=t?"block":"none"}
+function render(){
+const log=$("log");log.textContent="";
+if(!segs.length){const d=document.createElement("div");d.className="empty";d.textContent="La trascrizione apparirà qui.";log.appendChild(d);return}
+segs.forEach(s=>{const p=document.createElement("p"),t=document.createElement("time"),x=document.createElement("span");t.textContent=ts(s.s);x.textContent=s.t;p.append(t,x);log.appendChild(p)});
+log.scrollTop=log.scrollHeight}
+function setOn(v){on=v;$("rec").textContent=v?"Ferma":"Avvia";$("rec").classList.toggle("on",v);$("st").textContent=v?"In ascolto…":"Fermo"}
+function build(){
+rec=new SR();rec.continuous=true;rec.interimResults=true;rec.lang=$("lang").value;
+rec.onresult=e=>{
+const now=Date.now()-t0;let interim="";
+for(let i=e.resultIndex;i<e.results.length;i++){
+const r=e.results[i],t=r[0].transcript.trim();
+if(segStart===null)segStart=now;
+if(r.isFinal){
+if(t){segs.push({s:segStart,e:now,t});$("prev").textContent=t;render()}
+$("now").textContent="";segStart=null
+}else interim+=r[0].transcript}
+if(interim){const n=$("now");n.textContent="";const i=document.createElement("i");i.textContent=interim;n.appendChild(i)}};
+rec.onerror=e=>{
+if(e.error==="no-speech"||e.error==="aborted")return;
+if(e.error==="not-allowed"||e.error==="service-not-allowed"){showMsg("Accesso al microfono negato. Consenti il microfono per questa pagina nelle impostazioni del browser e riprova. Se la pagina è incorporata in un’altra app, aprila in una scheda a sé.");setOn(false)}
+else showMsg("Errore di riconoscimento: "+e.error)};
+rec.onend=()=>{if(on){try{rec.start()}catch(_){}}}}
+$("rec").onclick=()=>{
+showMsg("");
+if(!SR){showMsg("Questo browser non supporta il riconoscimento vocale. Usa Chrome, Edge o Safari aggiornati.");return}
+if(on){setOn(false);rec.stop();return}
+if(!segs.length)t0=Date.now();else if(!t0)t0=Date.now();
+build();try{rec.start();setOn(true)}catch(e){showMsg("Impossibile avviare: "+e.message)}};
+$("lang").onchange=()=>{if(on){const r=rec;on=false;r.onend=null;r.stop();on=true;build();try{rec.start()}catch(_){}}};
+function dl(name,text,type){const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;document.body.appendChild(a);a.click();a.remove()}
+const plain=()=>segs.map(s=>s.t).join("\n");
+$("txt").onclick=()=>segs.length&&dl("trascrizione.txt",plain(),"text/plain");
+$("srt").onclick=()=>segs.length&&dl("sottotitoli.srt",segs.map((s,i)=>`${i+1}\n${ts(s.s,1)} --> ${ts(Math.max(s.e,s.s+1000),1)}\n${s.t}\n`).join("\n"),"text/plain");
+$("cp").onclick=async()=>{try{await navigator.clipboard.writeText(plain());$("st").textContent="Copiato"}catch(_){showMsg("Copia non riuscita: seleziona il testo a mano.")}};
+$("clr").onclick=()=>{segs=[];segStart=null;t0=Date.now();$("prev").textContent="";$("now").textContent="I sottotitoli compariranno qui.";render()};
+if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(()=>{})}
+</script>
+</body>
+</html>
